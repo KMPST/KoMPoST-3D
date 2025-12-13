@@ -1,0 +1,2 @@
+Folders KoMPoST/RTA/ENERGYRESPONSE/ contain coordinate response functions to initial energy perturbations for kinetic evolution under relaxation time approximation
+which are read in by KoMPoST/src/ENERGYRESPONSE/CoordinateSpaceKineticTheory.inc
