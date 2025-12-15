@@ -38,10 +38,10 @@ should be user provided. See src/EnergyMomentumTensorIO_music.inc for an example
 //       
 // T^{munu} given in units Gev/fm^3, but saved in units of [GeV^4]
 
-3) KoMPoST::Setup() calls Greenfunctions::Setup() which in turn call kinetic or free streaming response function setups. In particular for
-kinetic theory a momentum space response data is loaded from data files in /EKT/ and bessel transformed to produce a coordinate space response functions which are interpolated on a 2D grid (time or radial coordinate).
+3) KoMPoST::Setup() calls Greenfunctions::Setup() which in turn call kinetic response function setups. In particular for
+kinetic theory a coordinate space response data is loaded from data files in /RTA/ which are interpolated on a 3D grid (time, radial coordinate and longitudinal rapidity).
 
-4) KoMPoST::Run() see KineticEvolution.cpp for details. In short, for each point in the transferse place a gaussian averaged background
+4) KoMPoST::Run() see KineticEvolution.cpp for details. In short, for each point in the 3D place a gaussian averaged background
 energy density is found which is then mapped to background energy momentum tensor at final time according to the scaling curve
 parametrized in BackgroundEvolution.cpp.
 The perturbations are then propagated by coordinate space Green functions in local causal neighbourgood around given point.
@@ -52,34 +52,35 @@ function EnergyMomentumTensorMapSave and write_initial_conditions_MUSIC.  See sr
 The local hydro fields and sigmaij can be also found.
 // SAVE TMUNU TO FILE //
 // File format
-//
-// for iy in Ns:
+// for ieta in Neta:
+//   for iy in Ns:
 //     for ix in Ns:
-//         1:x 2:y  
-//         3:T^{tautau} 4:T^{xx} 5:T^{yy} 6:tau^2 T^{etaeta} 
-//         7:-T^{tau x} 8:-T^{tauy} 9:-tau T^{taueta} 
-//         10:-T^{xy} 11:-tau T^{yeta} 12:-tau T^{etax} 
-//         13-28:CellData[0 -- 15] -- additonal cell data. See KineticEvolution.cpp for definitions
+//         1: eta 2:x 3:y  
+//         4:T^{tautau} 5:T^{xx} 6:T^{yy} 7:tau^2 T^{etaeta} 
+//         8:-T^{tau x} 9:-T^{tauy} 10:-tau T^{taueta} 
+//         11:-T^{xy} 12:-tau T^{yeta} 13:-tau T^{etax} 
+//         14-29:CellData[0 -- 15] -- additonal cell data. See KineticEvolution.cpp for definitions
 //
-// where ix and iy are cell indecies with grid parameters given by EventInput
-// with grid spacing afm in [fm] and grid size [Ns x Ns]
+// where ieta, ix and iy are cell indecies with grid parameters given by EventInput
+// with grid spacing afm in [fm] and deta, as well as grid size [Ns x Ns x Neta]
 // x, y given in [fm]
 //       
 // T^{munu} writen out in units [Gev/fm^3]
 
 MUSIC input file
 // Write initial condition file that can be read by MUSIC
-// for ix in Ns:
+// for ieta in Neta:
+//   for ix in Ns:
 //     for iy in Ns:
-//         1:ieta 2:ix 3:iy  
+//         1:eta 2:x 3:y  
 //         4:e [GeV/fm^3] 5:u^tau 6:u^x 7:u^y 8:u^eta [fm^{-1}] 
-//         9: pit^{tautau} 10:pi^{taux} 11:pi^{tauy} 12: pi^{taueta} 
+//         9: pi^{tautau} 10:pi^{taux} 11:pi^{tauy} 12: pi^{taueta} 
 //         13:pi^{xx} 14:pi^{xy} 15:pi^{xeta} 16:pi^{yy} 17:pi^{yeta} 18:pi^{etaeta}
 //
-// where ieta=0, and ix and iy are cell indecies with grid parameters given by EventInput
-// with grid spacing afm in [fm] and grid size [Ns x Ns]
+// where ieta, ix and iy are cell indecies with grid parameters given by EventInput
+// with grid spacing afm in [fm] and grid size [Ns x Ns x Neta]
 //       
-//\pi^{\mu\nu} is in units of fermi. //zj      weird
+//\pi^{\mu\nu} is in units of fermi. 
 // Note that the loop order is different than in the input file
 
 
@@ -126,8 +127,7 @@ MUSIC input file
        inih/ini.h
 
 # DATA FILES:
-       EKT/ENERGYRESPONSE/EnergyGreensFunctionT1-XX.txt
-       EKT/MOMENTUMRESPONSE/MomentumGreensFunctionT1-XX.txt
+       RTA/ENERGYRESPONSE/Gs_tot.dat
 
 # OUTPUT FILES:
       see Main.cpp and EnergyMomentumTensorIO_music.inc
