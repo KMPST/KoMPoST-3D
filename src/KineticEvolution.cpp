@@ -723,10 +723,10 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
 void Setup() {
   using namespace KoMPoSTParameters;
   // SETUP GREENS FUNCTIONS FOR ENERGY-MOMENTUM PERTURBATIONS //
-  const int NumberOfPoints_r = 31;
+  const int NumberOfPoints_r = 151;
   const double rMin=0;
   const double rMax=1.5;
-  const int NumberOfPoints_eta = 31;
+  const int NumberOfPoints_eta = 151;
   const double etaMin=0;
   const double etaMax=3.;
   GreensFunctions::Setup(NumberOfPoints_r, rMin, rMax, NumberOfPoints_eta, etaMin, etaMax, ENERGY_PERTURBATIONS,

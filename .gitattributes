@@ -1,0 +1,2 @@
+RTA/ENERGYRESPONSE/Gs_tot_finer.dat filter=lfs diff=lfs merge=lfs -text
+examples/McDIPPER/initial.dat filter=lfs diff=lfs merge=lfs -text

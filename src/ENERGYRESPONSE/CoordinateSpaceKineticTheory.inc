@@ -326,7 +326,7 @@ namespace CoordinateSpace{
         InStream_t.close();
 
         std::ifstream InStream;
-        InStream.open("./RTA/ENERGYRESPONSE/Gs_tot.dat");
+        InStream.open("./RTA/ENERGYRESPONSE/Gs_tot_finer.dat");
         std::string InputLine;
         if(InStream.good()){getline(InStream,InputLine);}
     
