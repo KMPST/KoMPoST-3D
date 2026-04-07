@@ -60,7 +60,7 @@ public:
     int Index3D(int x,int y,int eta){
         using EventInput::Ns;
         using EventInput::Neta;
-        return x+Ns*y+Ns*Neta*eta;
+        return x+Ns*y+Ns*Ns*eta;
     }
     // Index of mu nu component of stress tensor
     int Index(int mu,int nu,int xS,int yS,int etaS){
