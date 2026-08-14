@@ -16,6 +16,7 @@
 #include <iostream>
 #include <omp.h>
 #include <sstream>
+#include <vector>
 
 
 // ENERGY CUT-OFF //
@@ -153,18 +154,38 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
   std::cerr << "#COMPUTING EVOLUTION FROM " << tIn << " fm/c TO " << tOut
             << " fm/c" << std::endl;
 
+  const double sigma_r = SigmaBG;
+  const double sigma_eta = SigmaBG_eta;
+  const double nsigma = 4.0;
+  const int range_r = int(nsigma * sigma_r / afm) + 1;
+  const int range_eta = int(nsigma * sigma_eta / deta) + 1;
+  const int kernel_r_size = 2 * range_r + 1;
+  std::vector<double> weight_r_kernel(kernel_r_size * kernel_r_size);
+  std::vector<double> dxweight_kernel(kernel_r_size * kernel_r_size);
+  std::vector<double> dyweight_kernel(kernel_r_size * kernel_r_size);
+  std::vector<double> weight_eta_kernel(2 * range_eta + 1);
+  for (int dy = -range_r; dy <= range_r; dy++) {
+    for (int dx = -range_r; dx <= range_r; dx++) {
+      const int index = (dy + range_r) * kernel_r_size + dx + range_r;
+      const double r2 = (dx * dx + dy * dy) * afm * afm;
+      const double weight_r = afm * afm * exp(-r2 / (sigma_r * sigma_r)) / (M_PI * sigma_r * sigma_r);
+      weight_r_kernel[index] = weight_r;
+      dxweight_kernel[index] = weight_r * (-2.0) * dx * afm / (sigma_r * sigma_r);
+      dyweight_kernel[index] = weight_r * (-2.0) * dy * afm / (sigma_r * sigma_r);
+    }
+  }
+  // Cache Gaussian weights for relative eta offsets.
+  for (int de = -range_eta; de <= range_eta; de++) {
+    const double eta2 = de * de * deta * deta;
+    weight_eta_kernel[de + range_eta] = deta * exp(-eta2 / (sigma_eta * sigma_eta)) / sqrt(M_PI) / sigma_eta;
+  }
+
+  #pragma omp parallel for collapse(2) schedule(runtime)
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
-   #pragma omp parallel for
    for (int yS = ySTART; yS <= yEND; yS++) {
     // Class responsible for computing the scaling varaible.  We create a copy
     // for independently running  parallel process.
     ScalingVariable Scaler(ScalerIn);
-    // COMMANDLINE OUTPUT -- PROGRESS MONITOR //
-    if (omp_get_thread_num() == 0) {
-      std::cerr << "#BACKGROUND PROGRESS IS " << int(100*( (xEND - xSTART + 1) * (yS - ySTART) )/((double) (xEND - xSTART + 1) * (yEND - ySTART + 1) /
-                       omp_get_max_threads() )) << "\%" << " for etaS = " << etaS
-                << std::endl;
-    }
     for (int xS = xSTART; xS <= xEND; xS++) {
       //////////////////////////
       // BACKGROUND EVOLUTION //
@@ -188,12 +209,6 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
       double TYYInAvg = 0.0;
       double TZZInAvg = 0.0;
 
-      double sigma_r   = SigmaBG;
-      double sigma_eta = SigmaBG_eta;
-      const double nsigma = 4.0;
-      int range_r = int(nsigma * sigma_r / afm) + 1;
-      int range_eta=int(nsigma * sigma_eta/deta)+ 1;
-
       // LIMITS OF THE GAUSSIAN PROFILE //
       int xstart = std::max(xS - range_r, 0);
       int xend = std::min(xS + range_r, Ns);
@@ -206,21 +221,27 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
 
       double Normalization = 0.;
       for (int etaE = etastart; etaE < etaend; etaE++) {
+       const int eta_offset = etaE - etaS + range_eta;
+       const double cached_weight_eta = weight_eta_kernel[eta_offset];
        for (int yE = ystart; yE < yend; yE++) {
+        const int radial_row = (yE - yS + range_r) * kernel_r_size;
         for (int xE = xstart; xE < xend; xE++) {
+          const int radial_index = radial_row + xE - xS + range_r;
+          const double cached_weight_r = weight_r_kernel[radial_index];
           // Compute an average background energy density in a causal patch
-          double rsquare =
-              ((xE - xS) * (xE - xS) + (yE - yS) * (yE - yS)) * afm * afm;
-          double etasquare =
-              (etaE - etaS) * (etaE - etaS) * deta * deta;
-
-          double weight_r = afm * afm * exp(-rsquare / (sigma_r * sigma_r)) / (M_PI * sigma_r * sigma_r);
-          double weight_eta = deta  *   exp(-etasquare / (sigma_eta * sigma_eta)) / sqrt(M_PI) / sigma_eta ;
+          // Reuse the precomputed transverse Gaussian.
+          const double weight_r = cached_weight_r;
+          // Reuse the precomputed eta Gaussian.
+          const double weight_eta = cached_weight_eta;
 	  double weight=weight_r*weight_eta;
 
-          double dxweight = weight_r * -2. * (xE - xS) * afm / (sigma_r * sigma_r);
-          double dyweight = weight_r * -2. * (yE - yS) * afm / (sigma_r * sigma_r);
-          double detaweight = weight_eta * -2. * (etaE - etaS) * deta/ (sigma_eta * sigma_eta);
+          const double dxweight = dxweight_kernel[radial_index];
+          const double dyweight = dyweight_kernel[radial_index];
+          // Longitudinal derivative weight retained for future dzT00InAvg use.
+          // It remains disabled because dzT00InAvg is never accumulated.
+          // const double detaweight =
+          //     weight_eta * (-2.0) * (etaE - etaS) * deta /
+          //     (sigma_eta * sigma_eta);
           //double ddweight = 4. * weight / pow(sigma, 4) * (rsquare - pow(sigma, 2));
 
           T00InAvg += weight * TIn->Get(0, 0, xE, yE, etaE);
@@ -374,16 +395,15 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
             << " fm/c" << std::endl;
   // EVOLUTION TIME AND RADIUS OF CAUSAL CIRCLE //
   double EvolutionTime = (tOut - tIn);
+  // Bounding-box radii for the existing causal cuts.
+  const int range_r =
+      static_cast<int>(std::ceil(CircleRadius / afm));
+  const int range_eta =
+      static_cast<int>(std::ceil(Sigma_eta / deta));
 
+  #pragma omp parallel for collapse(2) schedule(runtime)
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
-   #pragma omp parallel for
    for (int yS = ySTART; yS <= yEND; yS++) {
-    // COMMANDLINE OUTPUT -- PROGRESS MONITOR //
-    if (omp_get_thread_num() == 0) {
-      std::cerr << "# PERTURBATION PROGRESS IS " << int(100*( (xEND - xSTART + 1) * (yS - ySTART) )/((double) (xEND - xSTART + 1) * (yEND - ySTART + 1) /
-                       omp_get_max_threads() )) << "\%" << " for etaS = " << etaS 
-                << std::endl;
-    }
     for (int xS = xSTART; xS <= xEND; xS++) {
       // Get information about the background
       double T00BG = TOutBG->Get(0, 0, xS, yS, etaS);
@@ -410,6 +430,13 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
       double TXZPert = 0.0;
       double TYZPert = 0.0;
 
+      const int xbegin = std::max(xS - range_r, 0);
+      const int xend = std::min(xS + range_r, Ns - 1);
+      const int ybegin = std::max(yS - range_r, 0);
+      const int yend = std::min(yS + range_r, Ns - 1);
+      const int etabegin = std::max(etaS - range_eta, 0);
+      const int etaend = std::min(etaS + range_eta, Neta - 1);
+
       // CHECK CUT-OFF CRITERION //
       if (T00InAvg <= ENERGY_CUTOFF) {
         // If below the cutoff ignore the perturbations
@@ -422,23 +449,36 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
         goto PERTURBATION_FINISHUP;
       }
 
-      for (int etaE = 0; etaE < Neta; etaE++) {
-       for (int yE = 0; yE < Ns; yE++) {
-        for (int xE = 0; xE < Ns; xE++) {
+      for (int etaE = etabegin; etaE <= etaend; etaE++) {
+       // Reject an entire eta slice before entering the x-y loops.
+       double DeltaEta = (etaS - etaE) * deta;
+       double Distance_eta = std::sqrt(DeltaEta * DeltaEta);
+       if (Distance_eta >= Sigma_eta) {
+         continue;
+       }
+       // The eta direction is zero at the central slice.
+       double Eta = 0.0;
+       if (Distance_eta != 0.0) {
+         Eta = DeltaEta / Distance_eta;
+       }
+       for (int yE = ybegin; yE <= yend; yE++) {
+        for (int xE = xbegin; xE <= xend; xE++) {
           // GET COORDINATES RELATIVE TO POINT OF INTEREST //
           double DeltaX = (xS - xE) * afm;
           double DeltaY = (yS - yE) * afm;
           double Distance_r = std::sqrt(DeltaX * DeltaX + DeltaY * DeltaY);
 
-	  double DeltaEta=(etaS-etaE)*deta;
-	  double Distance_eta=std::sqrt(DeltaEta*DeltaEta);
 
-          double rX = DeltaX / Distance_r;
-          double rY = DeltaY / Distance_r;
-          double Eta = DeltaEta / Distance_eta;
+          double rX = 0.0;
+          double rY = 0.0;
+          if (Distance_r != 0.0) {
+            rX = DeltaX / Distance_r;
+            rY = DeltaY / Distance_r;
+          }
 
           // CHECK THAT DISTANCES ARE RELEVANT FOR EVOLUTION //
-          if (Distance_r >= CircleRadius || Distance_eta >= Sigma_eta) {
+          // The eta cut was already applied outside the x-y loops.
+          if (Distance_r >= CircleRadius) {
             // We are outside the causal circle
             continue;
           }

@@ -149,6 +149,7 @@ public:
       using EventInput::Neta;
 
       // SET ALL ENTRIES TO ZERO //
+      #pragma omp parallel for collapse(2) schedule(static)
       for(int etaS=0;etaS<Neta;etaS++){
         for(int yS=0;yS<Ns;yS++){
             for(int xS=0;xS<Ns;xS++){
