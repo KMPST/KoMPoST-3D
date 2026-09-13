@@ -28,9 +28,9 @@
 
 enum error_codes { decomp_ok=0, decomp_failed=2};
 
-// Get shear tensor \pi^{\mu\nu} and bulk pressure \Pi given T^\mu_\nu, epsilon
-// and u^\mu at one spacetime point. The energy-momentum tensor of that point is given by Tmunu_raised[4][4]
-// Assume ************conformal EOS**************
+// Decompose Tmunu using the Landau-frame energy density and flow.
+// P_iso=(e-T^mu_mu)/3 is fixed by Tmunu. P=e/3 is used only to define
+// the conformal bulk-pressure component Pi=P_iso-P.
 void get_shear_and_bulk_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV, double energy_density, double * flow, double pimunu_raised[4][4], double & bulk_pressure) {
 	//Forward declarations
 	//For convenience
@@ -40,7 +40,7 @@ void get_shear_and_bulk_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV,
 	const double Tetaeta=Tmunu_raised[3][3];
 	const double gmunu_raised_hyperb[4][4]={{1,0,0,0},{0,-1,0,0},{0,0,-1,0},{0,0,0,-1./(tau_in_GeV*tau_in_GeV)}};
 
-	//Assume a conformal system
+	// Use P=e/3 only to separate P_iso into conformal pressure and bulk pressure.
 	double pressure=energy_density/3.;
 	//Trace of Tmunu
 	double Tmunu_trace=Ttautau-Txx-Tyy-tau_in_GeV*tau_in_GeV*Tetaeta;
@@ -84,6 +84,19 @@ void get_shear_and_bulk_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV,
 //  Input are Tmunu (Tmunu_raised[4][4]) and time (tau_in_GeV)
 //  Outputs are the energy_density, the flow and an error code (decomp_failed if no rest frame could be found, decomp_OK if epsilon and flow were found)
 void get_energy_flow_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV, double * energy_density, double flow[], enum error_codes * error_code) {
+	const double Ttautau=Tmunu_raised[0][0];
+	const double small_num=1e-6;
+	*energy_density=Ttautau;
+	flow[0]=1;
+	flow[1]=0;
+	flow[2]=0;
+	flow[3]=0;
+	*error_code=decomp_failed;
+
+	if (Ttautau<small_num) {
+		*error_code=decomp_ok;
+		return;
+	}
 
 	//GSL stuff
 	gsl_eigen_nonsymmv_workspace * eigen_ws = gsl_eigen_nonsymmv_alloc(4);
@@ -100,7 +113,6 @@ void get_energy_flow_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV, do
 	// \ T^\eta_\tau   T^\eta_x    T^\eta_y    T^\eta_\eta /       \ T^\eta\tau    -T^\eta x    -T^\eta y    -tau^2*T^\eta\eta /
 
 
-	const double Ttautau=Tmunu_raised[0][0];
 	const double Ttaux  =Tmunu_raised[0][1];
 	const double Ttauy  =Tmunu_raised[0][2];
 	const double Ttaueta=Tmunu_raised[0][3];
@@ -125,7 +137,10 @@ void get_energy_flow_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV, do
 	
 	// Solve eigensystem 
 	//gsl_eigen_nonsymmv (gsl_matrix * A, gsl_vector_complex * eval, gsl_matrix_complex * evec, gsl_eigen_nonsymmv_workspace * w);
-	gsl_eigen_nonsymmv(matrix, eigenvalues, eigenvectors, eigen_ws);
+	gsl_error_handler_t * old_handler=gsl_set_error_handler_off();
+	const int eigen_status=
+	    gsl_eigen_nonsymmv(matrix, eigenvalues, eigenvectors, eigen_ws);
+	gsl_set_error_handler(old_handler);
 
 	
 	//If a complex number has fabs(imag/real) smaller than this number, we consider if real
@@ -134,21 +149,16 @@ void get_energy_flow_from_Tmunu(double Tmunu_raised[4][4], double tau_in_GeV, do
 
 	// Find the only timelike eigenvector (flow) and corresponding eigenvalue (energy)
 	bool parse_eigensystem(double tau_in_GeV, double im_tolerance, gsl_matrix * matrix_orig, gsl_vector_complex * eigenvalues, gsl_matrix_complex * eigenvectors, double * energy, double flow[]);
-	bool decomp_success=parse_eigensystem(tau_in_GeV, real_enough_ratio, matrix_orig,eigenvalues,eigenvectors,energy_density, flow);
+	bool decomp_success=false;
+	if (eigen_status==GSL_SUCCESS)
+		decomp_success=parse_eigensystem(tau_in_GeV, real_enough_ratio,
+			matrix_orig,eigenvalues,eigenvectors,energy_density,flow);
 
 
 	enum error_codes local_error_code=decomp_failed;
 
-	const double small_num=1e-6;
 	if (decomp_success) {
 		local_error_code=decomp_ok;
-	}
-	else if (Ttautau<small_num){
-		*energy_density=Ttautau;
-		flow[0]=1;
-		flow[1]=0;
-		flow[2]=0;
-		flow[3]=0;
 	}
         
 	*error_code=local_error_code;
@@ -172,7 +182,6 @@ bool parse_eigensystem(double tau_in_GeV, double im_tolerance, gsl_matrix * matr
 
 	bool found_a_candidate=false;
 	bool found_too_many_candidates=false;
-	double tmp_energy=-1.;
 	double tmp_flow[4]={0.0};
 	double eigenvalue_candidate=0.;
 	double eigenvector_candidate[4]={0.0};
@@ -253,24 +262,16 @@ bool parse_eigensystem(double tau_in_GeV, double im_tolerance, gsl_matrix * matr
 		}
 	}
 
-	tmp_energy=eigenvalue_candidate;
+	if ((!found_a_candidate)||found_too_many_candidates)
+		return false;
 
 	//Assume the time-component is never zero. If it is, there's something weird going on
 	const double time_component_sign=eigenvector_candidate[0]/fabs(eigenvector_candidate[0]);
 	for(int k=0;k<4;k++) tmp_flow[k]=eigenvector_candidate[k]*time_component_sign/(sqrt(eigenvector_candidate_norm));
 
-	bool success=(!found_too_many_candidates)&&(found_a_candidate);
-
-	//If there's a problem, output debug info 
-	if (success) {
-
-			*energy=tmp_energy;
-
-			for(int i=0;i<4;i++) flow[i]=tmp_flow[i];
-
-	}
-
-	return  success;
+	*energy=eigenvalue_candidate;
+	for(int i=0;i<4;i++) flow[i]=tmp_flow[i];
+	return true;
 
 }
 #endif

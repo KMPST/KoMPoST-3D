@@ -44,7 +44,7 @@ void PrepareKoMPoSTEstimate(EnergyMomentumTensorMap *TOutBG,
   using namespace EventInput;
 
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
-   for (int yS = xSTART; yS <= xEND; yS++) {
+   for (int yS = ySTART; yS <= yEND; yS++) {
     for (int xS = xSTART; xS <= xEND; xS++) {
       double t00bg = TOutBG->Get(0, 0, xS, yS, etaS);
       double t00 = TOutFull->Get(0, 0, xS, yS, etaS);
@@ -74,7 +74,7 @@ void RegulateKoMPoSTAddition(EnergyMomentumTensorMap *TOutBG,
   using namespace EventInput;
 
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
-   for (int yS = xSTART; yS <= xEND; yS++) {
+   for (int yS = ySTART; yS <= yEND; yS++) {
     for (int xS = xSTART; xS <= xEND; xS++) {
       // Extract the stress
       double t00bg = TOutBG->Get(0, 0, xS, yS, etaS);
@@ -158,28 +158,35 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
   const double sigma_eta = SigmaBG_eta;
   const double nsigma = 4.0;
   const int range_r = int(nsigma * sigma_r / afm) + 1;
-  const int range_eta = int(nsigma * sigma_eta / deta) + 1;
+  const int range_eta =
+      EVOLUTION_MODE == 0 ? 0 : int(nsigma * sigma_eta / deta) + 1;
   const int kernel_r_size = 2 * range_r + 1;
+
   std::vector<double> weight_r_kernel(kernel_r_size * kernel_r_size);
   std::vector<double> dxweight_kernel(kernel_r_size * kernel_r_size);
   std::vector<double> dyweight_kernel(kernel_r_size * kernel_r_size);
-  std::vector<double> weight_eta_kernel(2 * range_eta + 1);
   for (int dy = -range_r; dy <= range_r; dy++) {
     for (int dx = -range_r; dx <= range_r; dx++) {
       const int index = (dy + range_r) * kernel_r_size + dx + range_r;
-      const double r2 = (dx * dx + dy * dy) * afm * afm;
-      const double weight_r = afm * afm * exp(-r2 / (sigma_r * sigma_r)) / (M_PI * sigma_r * sigma_r);
+      const double rsquare = (dx * dx + dy * dy) * afm * afm;
+      const double weight_r =
+          afm * afm * exp(-rsquare / (sigma_r * sigma_r)) /
+          (M_PI * sigma_r * sigma_r);
       weight_r_kernel[index] = weight_r;
-      dxweight_kernel[index] = weight_r * (-2.0) * dx * afm / (sigma_r * sigma_r);
-      dyweight_kernel[index] = weight_r * (-2.0) * dy * afm / (sigma_r * sigma_r);
+      dxweight_kernel[index] =
+          weight_r * -2. * dx * afm / (sigma_r * sigma_r);
+      dyweight_kernel[index] =
+          weight_r * -2. * dy * afm / (sigma_r * sigma_r);
     }
   }
-  // Cache Gaussian weights for relative eta offsets.
-  for (int de = -range_eta; de <= range_eta; de++) {
-    const double eta2 = de * de * deta * deta;
-    weight_eta_kernel[de + range_eta] = deta * exp(-eta2 / (sigma_eta * sigma_eta)) / sqrt(M_PI) / sigma_eta;
-  }
 
+  std::vector<double> weight_eta_kernel(2 * range_eta + 1);
+  for (int de = -range_eta; de <= range_eta; de++) {
+    const double etasquare = de * de * deta * deta;
+    weight_eta_kernel[de + range_eta] =
+        deta * exp(-etasquare / (sigma_eta * sigma_eta)) /
+        sqrt(M_PI) / sigma_eta;
+  }
   #pragma omp parallel for collapse(2) schedule(runtime)
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
    for (int yS = ySTART; yS <= yEND; yS++) {
@@ -202,8 +209,6 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
       double dxT00InAvg = 0.0;
       // The derivative of averaged T00 in the y direction / (T00 + TXX)
       double dyT00InAvg = 0.0;
-      // The derivative of averaged T00 in the eta direction / (T00 + TXX)
-      double dzT00InAvg = 0.0;
 
       double TXXInAvg = 0.0;
       double TYYInAvg = 0.0;
@@ -216,32 +221,22 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
       int ystart = std::max(yS - range_r, 0);
       int yend = std::min(yS + range_r, Ns);
 
-      int etastart = std::max(etaS - range_eta, 0);
-      int etaend = std::min(etaS + range_eta, Neta);
+      int etastart = EVOLUTION_MODE == 0 ? etaS : std::max(etaS - range_eta, 0);
+      int etaend = EVOLUTION_MODE == 0 ? etaS + 1 : std::min(etaS + range_eta, Neta);
 
       double Normalization = 0.;
       for (int etaE = etastart; etaE < etaend; etaE++) {
-       const int eta_offset = etaE - etaS + range_eta;
-       const double cached_weight_eta = weight_eta_kernel[eta_offset];
+       const double weight_eta = EVOLUTION_MODE == 0
+           ? 1.0 : weight_eta_kernel[etaE - etaS + range_eta];
        for (int yE = ystart; yE < yend; yE++) {
-        const int radial_row = (yE - yS + range_r) * kernel_r_size;
+        const int kernel_y = (yE - yS + range_r) * kernel_r_size;
         for (int xE = xstart; xE < xend; xE++) {
-          const int radial_index = radial_row + xE - xS + range_r;
-          const double cached_weight_r = weight_r_kernel[radial_index];
           // Compute an average background energy density in a causal patch
-          // Reuse the precomputed transverse Gaussian.
-          const double weight_r = cached_weight_r;
-          // Reuse the precomputed eta Gaussian.
-          const double weight_eta = cached_weight_eta;
-	  double weight=weight_r*weight_eta;
-
-          const double dxweight = dxweight_kernel[radial_index];
-          const double dyweight = dyweight_kernel[radial_index];
-          // Longitudinal derivative weight retained for future dzT00InAvg use.
-          // It remains disabled because dzT00InAvg is never accumulated.
-          // const double detaweight =
-          //     weight_eta * (-2.0) * (etaE - etaS) * deta /
-          //     (sigma_eta * sigma_eta);
+          const int kernel_index = kernel_y + xE - xS + range_r;
+          const double weight_r = weight_r_kernel[kernel_index];
+	  const double weight = weight_r * weight_eta;
+          const double dxweight = dxweight_kernel[kernel_index];
+          const double dyweight = dyweight_kernel[kernel_index];
           //double ddweight = 4. * weight / pow(sigma, 4) * (rsquare - pow(sigma, 2));
 
           T00InAvg += weight * TIn->Get(0, 0, xE, yE, etaE);
@@ -363,7 +358,7 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
       else {
         std::cerr << "#ERROR -- EVOLUTION MODE NOT SPECIFICED CORRECTLY"
                   << std::endl;
-        exit(0);
+        exit(1);
       }
 
       TOutBG->Set(xS, yS, etaS, T00BG, TXXBG, TYYBG, TZZBG, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
@@ -382,7 +377,8 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
                           EnergyMomentumTensorMap *TOutBG,
                           EnergyMomentumTensorMap *TOutFull,
                           int ENERGY_PERTURBATIONS, int MOMENTUM_PERTURBATIONS,
-                          int EVOLUTION_MODE, double CircleRadius, double Sigma_eta) {
+                          int EVOLUTION_MODE, double ResponseCutoff_r,
+                          double ResponseCutoff_eta) {
 
   using namespace EventInput;
 
@@ -395,11 +391,11 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
             << " fm/c" << std::endl;
   // EVOLUTION TIME AND RADIUS OF CAUSAL CIRCLE //
   double EvolutionTime = (tOut - tIn);
-  // Bounding-box radii for the existing causal cuts.
-  const int range_r =
-      static_cast<int>(std::ceil(CircleRadius / afm));
-  const int range_eta =
-      static_cast<int>(std::ceil(Sigma_eta / deta));
+  const int range_r = static_cast<int>(std::ceil(ResponseCutoff_r / afm));
+  const int range_eta = EVOLUTION_MODE == 0
+      ? 0 : static_cast<int>(std::ceil(ResponseCutoff_eta / deta));
+  const double response_measure =
+      afm * afm * (EVOLUTION_MODE == 0 ? 1.0 : deta);
 
   #pragma omp parallel for collapse(2) schedule(runtime)
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
@@ -434,8 +430,8 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
       const int xend = std::min(xS + range_r, Ns - 1);
       const int ybegin = std::max(yS - range_r, 0);
       const int yend = std::min(yS + range_r, Ns - 1);
-      const int etabegin = std::max(etaS - range_eta, 0);
-      const int etaend = std::min(etaS + range_eta, Neta - 1);
+      const int etabegin = EVOLUTION_MODE == 0 ? etaS : std::max(etaS - range_eta, 0);
+      const int etaend = EVOLUTION_MODE == 0 ? etaS : std::min(etaS + range_eta, Neta - 1);
 
       // CHECK CUT-OFF CRITERION //
       if (T00InAvg <= ENERGY_CUTOFF) {
@@ -450,37 +446,33 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
       }
 
       for (int etaE = etabegin; etaE <= etaend; etaE++) {
-       // Reject an entire eta slice before entering the x-y loops.
        double DeltaEta = (etaS - etaE) * deta;
        double Distance_eta = std::sqrt(DeltaEta * DeltaEta);
-       if (Distance_eta >= Sigma_eta) {
+       if (EVOLUTION_MODE != 0 && Distance_eta >= ResponseCutoff_eta) {
          continue;
        }
-       // The eta direction is zero at the central slice.
        double Eta = 0.0;
        if (Distance_eta != 0.0) {
          Eta = DeltaEta / Distance_eta;
        }
        for (int yE = ybegin; yE <= yend; yE++) {
+        double DeltaY = (yS - yE) * afm;
         for (int xE = xbegin; xE <= xend; xE++) {
           // GET COORDINATES RELATIVE TO POINT OF INTEREST //
           double DeltaX = (xS - xE) * afm;
-          double DeltaY = (yS - yE) * afm;
           double Distance_r = std::sqrt(DeltaX * DeltaX + DeltaY * DeltaY);
 
+          // CHECK THAT DISTANCES ARE RELEVANT FOR EVOLUTION //
+          if (Distance_r >= ResponseCutoff_r) {
+            // We are outside the causal circle
+            continue;
+          }
 
           double rX = 0.0;
           double rY = 0.0;
           if (Distance_r != 0.0) {
             rX = DeltaX / Distance_r;
             rY = DeltaY / Distance_r;
-          }
-
-          // CHECK THAT DISTANCES ARE RELEVANT FOR EVOLUTION //
-          // The eta cut was already applied outside the x-y loops.
-          if (Distance_r >= CircleRadius) {
-            // We are outside the causal circle
-            continue;
           }
 
           // COMPUTE AMPLITUDE OF INITIAL PERTURBATIONS //
@@ -552,13 +544,13 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
             } else if (EVOLUTION_MODE == 0) {
 
               Gs = GreensFunctions::EnergyPerturbations::FreeStreaming::
-                  CoordinateSpace::Gs(Distance_r, Distance_eta, EvolutionTime);
+                  CoordinateSpace::Gs(Distance_r, EvolutionTime);
               Gv = GreensFunctions::EnergyPerturbations::FreeStreaming::
-                  CoordinateSpace::Gv(Distance_r, Distance_eta, EvolutionTime);
+                  CoordinateSpace::Gv(Distance_r, EvolutionTime);
               Gd = GreensFunctions::EnergyPerturbations::FreeStreaming::
-                  CoordinateSpace::Gd(Distance_r, Distance_eta, EvolutionTime);
+                  CoordinateSpace::Gd(Distance_r, EvolutionTime);
               Gr = GreensFunctions::EnergyPerturbations::FreeStreaming::
-                  CoordinateSpace::Gr(Distance_r, Distance_eta, EvolutionTime);
+                  CoordinateSpace::Gr(Distance_r, EvolutionTime);
 	      Geta=0.0;
 	      Gseta=0.0;
 	      Gveta=0.0;
@@ -566,7 +558,7 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
             } else {
               std::cerr << "#ERROR -- EVOLUTION MODE NOT SPECIFICED CORRECTLY"
                         << std::endl;
-              exit(0);
+              exit(1);
             }
 
             // ENERGY-MOMENTUM TENSOR RESPONSE //
@@ -661,7 +653,7 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
             else {
               std::cerr << "#ERROR -- EVOLUTION MODE NOT SPECIFICED CORRECTLY"
                         << std::endl;
-              exit(0);
+              exit(1);
             }
 
             // ENERGY-MOMENTUM TENSOR RESPONSE //
@@ -711,36 +703,36 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
 
           // COMPUTE CONTRIBUTION TO ENERGY-MOMENTUM TENSOR AT POINT OF
           // INTEREST //
-          T00Pert += (afm * afm * deta) *
+          T00Pert += response_measure *
                      (+G00_00 * dT00In - G00_0X * dT0XIn - G00_0Y * dT0YIn) *
                      T00BG;
-          TXXPert += (afm * afm * deta) *
+          TXXPert += response_measure *
                      (+GXX_00 * dT00In - GXX_0X * dT0XIn - GXX_0Y * dT0YIn) *
                      T00BG;
-          TYYPert += (afm * afm * deta) *
+          TYYPert += response_measure *
                      (+GYY_00 * dT00In - GYY_0X * dT0XIn - GYY_0Y * dT0YIn) *
                      T00BG;
-          TZZPert += (afm * afm * deta) *
+          TZZPert += response_measure *
                      (+GZZ_00 * dT00In - GZZ_0X * dT0XIn - GZZ_0Y * dT0YIn) *
                      T00BG;
 
-          T0XPert += (afm * afm * deta) *
+          T0XPert += response_measure *
                      (-G0X_00 * dT00In + G0X_0X * dT0XIn + G0X_0Y * dT0YIn) *
                      T00BG;
-          T0YPert += (afm * afm * deta) *
+          T0YPert += response_measure *
                      (-G0Y_00 * dT00In + G0Y_0X * dT0XIn + G0Y_0Y * dT0YIn) *
                      T00BG;
-          TXYPert += (afm * afm * deta) *
+          TXYPert += response_measure *
                      (-GXY_00 * dT00In + GXY_0X * dT0XIn + GXY_0Y * dT0YIn) *
                      T00BG;
 
-          T0ZPert += (afm * afm * deta) *
+          T0ZPert += response_measure *
                      (-G0Z_00 * dT00In + G0Z_0X * dT0XIn + G0Z_0Y * dT0YIn) *
                      T00BG;
-          TXZPert += (afm * afm * deta) *
+          TXZPert += response_measure *
                      (-GXZ_00 * dT00In + GXZ_0X * dT0XIn + GXZ_0Y * dT0YIn) *
                      T00BG;
-          TYZPert += (afm * afm * deta) *
+          TYZPert += response_measure *
                      (-GYZ_00 * dT00In + GYZ_0X * dT0XIn + GYZ_0Y * dT0YIn) *
                      T00BG;
         } // Loop over the  x-coordinate of causal patch
@@ -762,6 +754,23 @@ void ComputePerturbations(EnergyMomentumTensorMap *TIn,
 
 void Setup() {
   using namespace KoMPoSTParameters;
+
+  if (EVOLUTION_MODE == 2) {
+    std::cerr << "#ERROR: low-k mode is not implemented for 3D evolution."
+              << std::endl;
+    exit(1);
+  }
+
+  if (EVOLUTION_MODE == 3) {
+    std::cerr << "#ExactFS does not use response functions." << std::endl;
+    return;
+  }
+
+  if (MOMENTUM_PERTURBATIONS) {
+    std::cerr << "#ERROR: momentum perturbations are not implemented."
+              << std::endl;
+    std::exit(EXIT_FAILURE);
+  }
   // SETUP GREENS FUNCTIONS FOR ENERGY-MOMENTUM PERTURBATIONS //
   const int NumberOfPoints_r = 151;
   const double rMin=0;
@@ -770,20 +779,27 @@ void Setup() {
   const double etaMin=0;
   const double etaMax=3.;
   GreensFunctions::Setup(NumberOfPoints_r, rMin, rMax, NumberOfPoints_eta, etaMin, etaMax, ENERGY_PERTURBATIONS,
-                         MOMENTUM_PERTURBATIONS);
+                         MOMENTUM_PERTURBATIONS, EVOLUTION_MODE);
 
   
   //GreensFunctions::Output(ENERGY_PERTURBATIONS, MOMENTUM_PERTURBATIONS);
 }
 
 void Run(EnergyMomentumTensorMap *TIn, EnergyMomentumTensorMap *TOutBG,
-         EnergyMomentumTensorMap *TOutFull) {
+         EnergyMomentumTensorMap *TOutFull,
+         ChargeCurrentMap *JIn, ChargeCurrentMap *JOut) {
 
   using namespace KoMPoSTParameters;
+  if (EVOLUTION_MODE == 3) {
+    // ExactFS does not use a background decomposition.
+    // TOutBG remains zero-filled for the common output interface.
+    ComputeExactFreeStreaming(TIn, TOutFull, JIn, JOut);
+    return;
+  }
 
   double EvolutionTime = TOutFull->tau - TIn->tau;
-  double SigmaBG = 0.;
-  double SigmaBG_eta = 0.;
+  double SigmaBG = 0.;     // Transverse background Gaussian width in fm
+  double SigmaBG_eta = 0.; // Background Gaussian width in spacetime rapidity
 
   // The Scaler is responsible for computing the scaling variable for a given
   // eta/s. The parameters EtaOverS and EtaOverSTemperature scale are passed
@@ -795,16 +811,15 @@ void Run(EnergyMomentumTensorMap *TIn, EnergyMomentumTensorMap *TOutBG,
     std::cerr << "*** KoMPoST::Run *** Regulator TwoPass is not appropriate for "
                  "the low k limit, selected by EVOLUTION_MODE == 2. Aborting!"
               << std::endl;
-    exit(0);
+    exit(1);
   }
 
   // If the two pass regulator is used, then we run through the program twice
   // The first time is just to estimate the size of the perturbations.  In the
   // second pass we regulate the perturbations
-  int npass = 1;
-  if (KoMPoSTParameters::Regulator == "TwoPass") {
-    npass = 2;
-  }
+  const bool UseTwoPass =
+      KoMPoSTParameters::Regulator == "TwoPass" && EVOLUTION_MODE == 1;
+  int npass = UseTwoPass ? 2 : 1;
   bool IsFirstPass = true;
 
   // Start the run
@@ -821,31 +836,32 @@ void Run(EnergyMomentumTensorMap *TIn, EnergyMomentumTensorMap *TOutBG,
     // Evolve the backround, compute the scaling variable, K etc
     ComputeBackground(IsFirstPass, TIn, TOutBG, Scaler, SigmaBG, SigmaBG_eta,
                       EVOLUTION_MODE);
-    // The peturbations are propagated from anywhere within a circle of radius
-    // CicleRadius.  Typically this is just the causal circle (plus a little
-    // bit) But for the low k limit (EVOLUTION_MODE==2) we take something
-    // different.
-    double CircleRadius = 0.;
-    double Sigma_eta=3.;// from dynamics: the region where response functions vanish
+
+    // Maximum source-target separations used in the response convolution.
+    // For EKT and legacy FS, the transverse cutoff includes the causal radius
+    // and three response-regulator widths.
+    double ResponseCutoff_r = 0.;
+    const double ResponseCutoff_eta = 3.; // EKT table support in |Delta eta|
     if (EVOLUTION_MODE != 2) {
-      // Causal circle
-      CircleRadius = EvolutionTime * (1. + 3. * Sigma);
+      ResponseCutoff_r = EvolutionTime * (1. + 3. * Sigma);
     } else {
-      CircleRadius = 4 * SigmaBG; // Take a circle four times the BG
+      ResponseCutoff_r = 4 * SigmaBG; // Low-k cutoff set by background width
     }
 
     // Evolve the petrubations. The scaling variable and K are
     // stored in the CellData structure of TOutFull.
 
-    ComputePerturbations(TIn, TOutBG, TOutFull, ENERGY_PERTURBATIONS, MOMENTUM_PERTURBATIONS, EVOLUTION_MODE, CircleRadius, Sigma_eta);
+    ComputePerturbations(TIn, TOutBG, TOutFull, ENERGY_PERTURBATIONS, MOMENTUM_PERTURBATIONS, EVOLUTION_MODE, ResponseCutoff_r, ResponseCutoff_eta);
 
     // Regulate the perturbations so that the inversion problem is well posed.
-    if (KoMPoSTParameters::Regulator == "TwoPass") {
+    if (UseTwoPass) {
       if (IsFirstPass) {
         std::cerr << "#Preparing for second pass ... " << std::endl;
         PrepareKoMPoSTEstimate(TOutBG, TOutFull);
         IsFirstPass = false;
       }
+    } else if (KoMPoSTParameters::Regulator == "TwoPass" && EVOLUTION_MODE == 0) {
+      std::cerr << "#TwoPass is inactive for free streaming; using one pass." << std::endl;
     } else if (KoMPoSTParameters::Regulator == "KoMPoSTAddition") {
       std::cerr<< "###########Regulation with KoMPoSTAddition ... " << std::endl;
       RegulateKoMPoSTAddition(TOutBG, TOutFull);
@@ -855,6 +871,7 @@ void Run(EnergyMomentumTensorMap *TIn, EnergyMomentumTensorMap *TOutBG,
       std::cerr << "#KoMPoSTParameters::Regulator string does not match any of the "
                    "expected choices TwoPass/KoMPoSTAddition/NoRegulator! Aborting"
                 << std::endl;
+      exit(1);
     }
   }
 }

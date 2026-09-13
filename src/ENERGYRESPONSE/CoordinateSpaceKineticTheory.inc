@@ -8,6 +8,7 @@
  * of the source distribution, or alternately available at:
  * https://github.com/KMPST/KoMPoST/
  */
+
 #ifndef M_HBARC
 #define M_HBARC  0.197326979
 #endif
@@ -367,6 +368,7 @@ namespace CoordinateSpace{
         rMin=rValues[0]; rMax=rValues[NumberOfPoints_r-1];
         etaMin=etaValues[0]; etaMax=etaValues[NumberOfPoints_eta-1];deta=(etaMax-etaMin)/(NumberOfPoints_eta-1);
         tMin=tValues[0]; tMax=tValues[NumberOfTimes-1];
+
 	for(int etaIndex=0; etaIndex<NumberOfPoints_eta; etaIndex++){        
             gsl_spline2d_init(GsInt[etaIndex],rValues,tValues,GsValues[etaIndex],NumberOfPoints_r,NumberOfTimes);
             gsl_spline2d_init(GvInt[etaIndex],rValues,tValues,GvValues[etaIndex],NumberOfPoints_r,NumberOfTimes);

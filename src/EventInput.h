@@ -17,6 +17,18 @@
 
 class INIReader;
 
+namespace KoMPoSTInputs {
+extern std::string InputFile;
+extern std::string InputFormat;
+extern std::string OutputFileTag;
+extern std::string OutputFormat;
+extern double McDipperKFactor;
+extern double tIn;
+extern double tOut;
+
+void Setup(INIReader &reader);
+}
+
 namespace EventInput {
 
 extern double afm;
@@ -34,20 +46,26 @@ extern int etaSTART;
 extern int etaEND;
 
 void Setup(INIReader &reader);
+void Validate();
+void Print();
 }
 
 namespace KoMPoSTParameters {
+extern double NuEff;
 extern double EtaOverS;
 extern double EtaOverSTemperatureScale;
 extern double Sigma;
-extern double Sigma_eta;
+extern double Sigma_Res_Reg;
 
 extern std::string Regulator;
 
 extern int EVOLUTION_MODE;
+// Exact free-streaming parameters
+extern double V_FS;
+extern int NPHI;
+extern int EVOLVE_CHARGES;
 extern int ENERGY_PERTURBATIONS;
 extern int MOMENTUM_PERTURBATIONS;
-extern int DECOMPOSITION_METHOD;
 
 void Setup(INIReader &reader);
 }

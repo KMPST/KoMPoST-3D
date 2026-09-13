@@ -12,6 +12,7 @@
 #define KINETICEVOLUTION_H
 
 class EnergyMomentumTensorMap;
+class ChargeCurrentMap;
 class ScalingVariable;
 
 namespace KoMPoST {
@@ -21,7 +22,15 @@ void Setup();
 
 //! Run the KoMPoST evolution based on  the parameters in KoMPoSTParameters
 void Run(EnergyMomentumTensorMap *TIn, EnergyMomentumTensorMap *TOutBG,
-         EnergyMomentumTensorMap *TOutFull);
+         EnergyMomentumTensorMap *TOutFull,
+         ChargeCurrentMap *JIn, ChargeCurrentMap *JOut);
+
+// Propagate the full input with transverse free-streaming characteristics.
+// The McDIPPER surface density is recovered from TIn.
+// No background/perturbation decomposition is used.
+void ComputeExactFreeStreaming(EnergyMomentumTensorMap *TIn,
+                               EnergyMomentumTensorMap *TOutFull,
+                               ChargeCurrentMap *JIn, ChargeCurrentMap *JOut);
 
 void PrepareKoMPoSTEstimate(EnergyMomentumTensorMap *TOutBG,
                         EnergyMomentumTensorMap *TOutFull);
@@ -32,13 +41,15 @@ void RegulateKoMPoSTAddition(EnergyMomentumTensorMap *TOutBG,
 void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
                        EnergyMomentumTensorMap *TOutBG,
                        const ScalingVariable &ScalerIn, double SigmaBG,
+                       double SigmaBG_eta,
                        int EVOLUTION_MODE);
 
 void ComputePerturbations(EnergyMomentumTensorMap *TIn,
                           EnergyMomentumTensorMap *TOutBG,
                           EnergyMomentumTensorMap *TOutFull,
                           int ENERGY_PERTURBATIONS, int MOMENTUM_PERTURBATIONS,
-                          int EVOLUTION_MODE, double CircleRadius);
+                          int EVOLUTION_MODE, double ResponseCutoff_r,
+                          double ResponseCutoff_eta);
 }
 
 #endif

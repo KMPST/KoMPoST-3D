@@ -59,7 +59,6 @@ public:
     // INDEXING //
     int Index3D(int x,int y,int eta){
         using EventInput::Ns;
-        using EventInput::Neta;
         return x+Ns*y+Ns*Ns*eta;
     }
     // Index of mu nu component of stress tensor
@@ -196,10 +195,10 @@ public:
     
     // DE-STRUCTOR //
     ~EnergyMomentumTensorMap(){
-        delete T;
-        delete CellData;
-        delete Ed;
-        delete Ui;
+      delete[] T;
+      delete[] CellData;
+      delete[] Ed;
+      delete[] Ui;
     }
 };
 #endif

@@ -13,12 +13,13 @@
 #include<fstream>
 #include<sstream>
 #include<omp.h>
-
+#include <iomanip>
 
 // GSL INTEGRATION //
 #include <gsl/gsl_integration.h>
 
 #include "GreensFunctions.h"
+#include "EventInput.h"
 
 struct GSLVariables {double r; double s;};
 
@@ -126,10 +127,10 @@ namespace  GreensFunctions {
             
             
             // SETUP //
-            void Setup(int NumberOfPoints_r, double rMin, double rMax, int NumberOfPoints_eta, double etaMin, double etaMax){
+            void Setup(int NumberOfPoints_r, double rMin, double rMax){
                 
                 
-                CoordinateSpace::Setup(NumberOfPoints_r, rMin, rMax, NumberOfPoints_eta, etaMin, etaMax);
+                CoordinateSpace::Setup(NumberOfPoints_r, rMin, rMax);
                 
                 // COMMANDLINE OUTPUT //
                 std::cerr << "#FS setup DONE" << std::endl;
@@ -245,14 +246,18 @@ namespace  GreensFunctions {
     // SETUP RESPONSE KERNELS //
     ////////////////////////////
     
-    void Setup(int NumberOfPoints_r,double rMin,double rMax,int NumberOfPoints_eta,double etaMin,double etaMax,int ENERGY_PERTURBATIONS,int MOMENTUM_PERTURBATIONS){
+    void Setup(int NumberOfPoints_r,double rMin,double rMax,int NumberOfPoints_eta,double etaMin,double etaMax,int ENERGY_PERTURBATIONS,int MOMENTUM_PERTURBATIONS,int EVOLUTION_MODE){
         
         // SETUP ENERGY PERTURBATIONS //
         if(ENERGY_PERTURBATIONS){
             
-            //SETUP FREE-STREAMING AND KINETIC THEORY EVOLUTION //
-            EnergyPerturbations::FreeStreaming::Setup(NumberOfPoints_r,rMin,rMax,NumberOfPoints_eta,etaMin,etaMax);
-            EnergyPerturbations::KineticTheory::Setup(NumberOfPoints_r,rMin,rMax,NumberOfPoints_eta,etaMin,etaMax);
+            if (EVOLUTION_MODE == 0) {
+                EnergyPerturbations::FreeStreaming::Setup(
+                    NumberOfPoints_r,rMin,rMax);
+            } else {
+                EnergyPerturbations::KineticTheory::Setup(
+                    NumberOfPoints_r,rMin,rMax,NumberOfPoints_eta,etaMin,etaMax);
+            }
 
         }
         

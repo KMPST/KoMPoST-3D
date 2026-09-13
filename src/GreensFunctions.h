@@ -23,10 +23,10 @@ namespace EnergyPerturbations {
 
 namespace FreeStreaming {
 namespace CoordinateSpace {
-double Gs(double dX, double dETA, double dT);
-double Gv(double dX, double dETA, double dT);
-double Gd(double dX, double dETA, double dT);
-double Gr(double dX, double dETA, double dT);
+double Gs(double dX, double dT);
+double Gv(double dX, double dT);
+double Gd(double dX, double dT);
+double Gr(double dX, double dT);
 }
 } // FreeStreaming
 
@@ -84,7 +84,7 @@ double Htr(double dX, double dT, double ScalingVarOut);
 
 //////////////////////////////////////////////////
 
-void Setup(int NumberOfPoints_r,double rMin,double rMax,int NumberOfPoints_eta,double etaMin,double etaMax,int ENERGY_PERTURBATIONS,int MOMENTUM_PERTURBATIONS);
+void Setup(int NumberOfPoints_r,double rMin,double rMax,int NumberOfPoints_eta,double etaMin,double etaMax,int ENERGY_PERTURBATIONS,int MOMENTUM_PERTURBATIONS,int EVOLUTION_MODE);
 
 void Output(int ENERGY_PERTURBATIONS, int MOMENTUM_PERTURBATIONS);
 
