@@ -162,21 +162,19 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
       EVOLUTION_MODE == 0 ? 0 : int(nsigma * sigma_eta / deta) + 1;
   const int kernel_r_size = 2 * range_r + 1;
 
-  std::vector<double> weight_r_kernel(kernel_r_size * kernel_r_size);
-  std::vector<double> dxweight_kernel(kernel_r_size * kernel_r_size);
-  std::vector<double> dyweight_kernel(kernel_r_size * kernel_r_size);
-  for (int dy = -range_r; dy <= range_r; dy++) {
-    for (int dx = -range_r; dx <= range_r; dx++) {
-      const int index = (dy + range_r) * kernel_r_size + dx + range_r;
-      const double rsquare = (dx * dx + dy * dy) * afm * afm;
-      const double weight_r =
-          afm * afm * exp(-rsquare / (sigma_r * sigma_r)) /
-          (M_PI * sigma_r * sigma_r);
-      weight_r_kernel[index] = weight_r;
-      dxweight_kernel[index] =
-          weight_r * -2. * dx * afm / (sigma_r * sigma_r);
-      dyweight_kernel[index] =
-          weight_r * -2. * dy * afm / (sigma_r * sigma_r);
+  std::vector<double> weight_r_kernel(kernel_r_size);
+  for (int d = -range_r; d <= range_r; d++) {
+    weight_r_kernel[d + range_r] =
+        afm * exp(-d * d * afm * afm / (sigma_r * sigma_r)) /
+        (sqrt(M_PI) * sigma_r);
+  }
+
+  std::vector<double> normalization_r(Ns, 0.0);
+  for (int i = 0; i < Ns; i++) {
+    const int begin = std::max(i - range_r, 0);
+    const int end = std::min(i + range_r, Ns);
+    for (int j = begin; j < end; j++) {
+      normalization_r[i] += weight_r_kernel[j - i + range_r];
     }
   }
 
@@ -187,6 +185,91 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
         deta * exp(-etasquare / (sigma_eta * sigma_eta)) /
         sqrt(M_PI) / sigma_eta;
   }
+
+  std::vector<double> normalization_eta(Neta, 1.0);
+  if (EVOLUTION_MODE != 0) {
+    for (int i = 0; i < Neta; i++) {
+      const int begin = std::max(i - range_eta, 0);
+      const int end = std::min(i + range_eta, Neta);
+      normalization_eta[i] = 0.0;
+      for (int j = begin; j < end; j++) {
+        normalization_eta[i] +=
+            weight_eta_kernel[j - i + range_eta];
+      }
+    }
+  }
+
+  const long NumberOfCells = long(Ns) * Ns * Neta;
+  std::vector<double> T00AvgXY(NumberOfCells);
+  std::vector<double> TXXAvgXY(NumberOfCells);
+  std::vector<double> TYYAvgXY(NumberOfCells);
+  std::vector<double> TZZAvgXY(NumberOfCells);
+
+  {
+    std::vector<double> T00AvgX(NumberOfCells);
+    std::vector<double> TXXAvgX(NumberOfCells);
+    std::vector<double> TYYAvgX(NumberOfCells);
+    std::vector<double> TZZAvgX(NumberOfCells);
+
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int etaS = 0; etaS < Neta; etaS++) {
+      for (int yS = 0; yS < Ns; yS++) {
+        for (int xS = 0; xS < Ns; xS++) {
+          double T00 = 0.0;
+          double TXX = 0.0;
+          double TYY = 0.0;
+          double TZZ = 0.0;
+          const int begin = std::max(xS - range_r, 0);
+          const int end = std::min(xS + range_r, Ns);
+          for (int xE = begin; xE < end; xE++) {
+            const double weight =
+                weight_r_kernel[xE - xS + range_r];
+            T00 += weight * TIn->Get(0, 0, xE, yS, etaS);
+            TXX += weight * TIn->Get(1, 1, xE, yS, etaS);
+            TYY += weight * TIn->Get(2, 2, xE, yS, etaS);
+            TZZ += weight * TIn->Get(3, 3, xE, yS, etaS);
+          }
+          const long index =
+              xS + long(Ns) * (yS + long(Ns) * etaS);
+          T00AvgX[index] = T00;
+          TXXAvgX[index] = TXX;
+          TYYAvgX[index] = TYY;
+          TZZAvgX[index] = TZZ;
+        }
+      }
+    }
+
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int etaS = 0; etaS < Neta; etaS++) {
+      for (int yS = 0; yS < Ns; yS++) {
+        for (int xS = 0; xS < Ns; xS++) {
+          double T00 = 0.0;
+          double TXX = 0.0;
+          double TYY = 0.0;
+          double TZZ = 0.0;
+          const int begin = std::max(yS - range_r, 0);
+          const int end = std::min(yS + range_r, Ns);
+          for (int yE = begin; yE < end; yE++) {
+            const double weight =
+                weight_r_kernel[yE - yS + range_r];
+            const long input_index =
+                xS + long(Ns) * (yE + long(Ns) * etaS);
+            T00 += weight * T00AvgX[input_index];
+            TXX += weight * TXXAvgX[input_index];
+            TYY += weight * TYYAvgX[input_index];
+            TZZ += weight * TZZAvgX[input_index];
+          }
+          const long index =
+              xS + long(Ns) * (yS + long(Ns) * etaS);
+          T00AvgXY[index] = T00;
+          TXXAvgXY[index] = TXX;
+          TYYAvgXY[index] = TYY;
+          TZZAvgXY[index] = TZZ;
+        }
+      }
+    }
+  }
+
   #pragma omp parallel for collapse(2) schedule(runtime)
   for (int etaS = etaSTART; etaS <= etaEND; etaS++) {
    for (int yS = ySTART; yS <= yEND; yS++) {
@@ -200,68 +283,35 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
 
       // ENERGY AVERAGED WITH GAUSSIAN PROFILE  //
       double T00InAvg = 0.0;
-
-      // Minus Seond derivative of the averaged energy density background
-      // divided by  (T00 + T^xx) ) =  - d_i d^i T00/(T00 + TXX)  . This is
-      // needed for the low-k limit.
-      double ddT00InAvg = 0.0;
-      // The derivative of averaged T00 in the x direction / (T00 + TXX)
-      double dxT00InAvg = 0.0;
-      // The derivative of averaged T00 in the y direction / (T00 + TXX)
-      double dyT00InAvg = 0.0;
-
       double TXXInAvg = 0.0;
       double TYYInAvg = 0.0;
       double TZZInAvg = 0.0;
 
-      // LIMITS OF THE GAUSSIAN PROFILE //
-      int xstart = std::max(xS - range_r, 0);
-      int xend = std::min(xS + range_r, Ns);
+      const int etastart =
+          EVOLUTION_MODE == 0 ? etaS : std::max(etaS - range_eta, 0);
+      const int etaend =
+          EVOLUTION_MODE == 0 ? etaS + 1
+                              : std::min(etaS + range_eta, Neta);
 
-      int ystart = std::max(yS - range_r, 0);
-      int yend = std::min(yS + range_r, Ns);
-
-      int etastart = EVOLUTION_MODE == 0 ? etaS : std::max(etaS - range_eta, 0);
-      int etaend = EVOLUTION_MODE == 0 ? etaS + 1 : std::min(etaS + range_eta, Neta);
-
-      double Normalization = 0.;
       for (int etaE = etastart; etaE < etaend; etaE++) {
-       const double weight_eta = EVOLUTION_MODE == 0
-           ? 1.0 : weight_eta_kernel[etaE - etaS + range_eta];
-       for (int yE = ystart; yE < yend; yE++) {
-        const int kernel_y = (yE - yS + range_r) * kernel_r_size;
-        for (int xE = xstart; xE < xend; xE++) {
-          // Compute an average background energy density in a causal patch
-          const int kernel_index = kernel_y + xE - xS + range_r;
-          const double weight_r = weight_r_kernel[kernel_index];
-	  const double weight = weight_r * weight_eta;
-          const double dxweight = dxweight_kernel[kernel_index];
-          const double dyweight = dyweight_kernel[kernel_index];
-          //double ddweight = 4. * weight / pow(sigma, 4) * (rsquare - pow(sigma, 2));
-
-          T00InAvg += weight * TIn->Get(0, 0, xE, yE, etaE);
-
-          dxT00InAvg += dxweight * TIn->Get(0, 0, xE, yE, etaE);
-          dyT00InAvg += dyweight * TIn->Get(0, 0, xE, yE, etaE);
-          //ddT00InAvg += ddweight * TIn->Get(0, 0, xE, yE, etaE);
-
-          TXXInAvg += weight * TIn->Get(1, 1, xE, yE, etaE);
-          TYYInAvg += weight * TIn->Get(2, 2, xE, yE, etaE);
-          TZZInAvg += weight * TIn->Get(3, 3, xE, yE, etaE);
-
-          Normalization += weight;
-        }
-       }
+        const double weight = EVOLUTION_MODE == 0
+            ? 1.0 : weight_eta_kernel[etaE - etaS + range_eta];
+        const long index =
+            xS + long(Ns) * (yS + long(Ns) * etaE);
+        T00InAvg += weight * T00AvgXY[index];
+        TXXInAvg += weight * TXXAvgXY[index];
+        TYYInAvg += weight * TYYAvgXY[index];
+        TZZInAvg += weight * TZZAvgXY[index];
       }
+
+      const double Normalization =
+          normalization_r[xS] * normalization_r[yS] *
+          normalization_eta[etaS];
       // NORMALIZE //
       T00InAvg /= Normalization;
       TXXInAvg /= Normalization;
       TYYInAvg /= Normalization;
       TZZInAvg /= Normalization;
-
-      //ddT00InAvg /= (Normalization * (T00InAvg + TXXInAvg));
-      dxT00InAvg /= (Normalization * (T00InAvg + TXXInAvg));
-      dyT00InAvg /= (Normalization * (T00InAvg + TXXInAvg));
 
       // EVOLUTION OF BACKGROUND ENERGY DENSITY  //
       double T00BG = 0.0;
@@ -324,14 +374,6 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
         TOutBG->SetCellData(4, xS, yS, etaS, EtaByS0);
         TOutBG->SetCellData(5, xS, yS, etaS, SigmaBG);
 
-        // Minus Seond derivative of the averaged energy density background
-        // divided by  (T00 + T^xx) ) =  - d_i d^i T00/(T00 + TXX)  . This and
-        // the other derivatives are needed  for the low-k limit.
-        TOutBG->SetCellData(6, xS, yS, etaS, ddT00InAvg);
-        // The derivative of averaged T00 in the x direction / (T00 + TXX). T
-        TOutBG->SetCellData(7, xS, yS, etaS, dxT00InAvg);
-        // The derivative of averaged T00 in the y direction / (T00 + TXX)
-        TOutBG->SetCellData(8, xS, yS, etaS, dyT00InAvg);
       }
       // FREE-STREAMING 
       else if (EVOLUTION_MODE == 0) {
@@ -351,9 +393,6 @@ void ComputeBackground(bool IsFirstPass, EnergyMomentumTensorMap *TIn,
         TOutBG->SetCellData(3, xS, yS, etaS, TXXInAvg);
         TOutBG->SetCellData(4, xS, yS, etaS, 0.);
         TOutBG->SetCellData(5, xS, yS, etaS, SigmaBG);
-        TOutBG->SetCellData(6, xS, yS, etaS, ddT00InAvg);
-        TOutBG->SetCellData(7, xS, yS, etaS, dxT00InAvg);
-        TOutBG->SetCellData(8, xS, yS, etaS, dyT00InAvg);
       }
       else {
         std::cerr << "#ERROR -- EVOLUTION MODE NOT SPECIFICED CORRECTLY"
